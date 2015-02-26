@@ -23,6 +23,8 @@ then nanocomp can be compiled and installed in ${HOME}/nanocomp using
 		--with-hdf5=${HDF5PREFIX} --prefix=${HOME}/nanocomp
 	- make install
 
+Please note that HDF5 needs to be set up for multi threading, otherwise nanocomp will crash.
+
 Running the program
 -------------------
 
