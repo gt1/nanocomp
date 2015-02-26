@@ -113,9 +113,79 @@ else
 	fi
 fi
 
+AC_ARG_WITH([hdf5],
+	[AS_HELP_STRING([--with-hdf5@<:@=PATH@:>@], [path to installed HDF5 library @<:@default=no@:>@])],
+	[with_hdf5=${withval}],
+	[with_hdf5=no])
+LIBMAUS_HAVE_HDF5=
+
+if test "${with_hdf5}" != "no" ; then
+	HDF5DIR=
+	if test "${with_hdf5}" != "yes" ; then
+		HDF5DIR=${with_hdf5}
+	fi
+	
+	CPPFLAGS_SAVE=${CPPFLAGS}
+	CXXFLAGS_SAVE=${CXXFLAGS}
+	LIBS_SAVE=${LIBS}
+	LDFLAGS_SAVE=${LDFLAGS}
+	
+	if test ! -z "${HDF5DIR}" ; then
+		CPPFLAGS="-I${HDF5DIR}/include"
+		LDFLAGS="-L${HDF5DIR}/lib"
+	fi
+
+	AC_LANG_PUSH([C++])
+	AC_CHECK_HEADER(hdf5.h, [hdf5_h=yes], [hdf5_h=no])
+	AC_LANG_POP
+	
+	if test "${hdf5_h}" = "yes" ; then
+AC_MSG_CHECKING([for hdf5_hl.h])
+AC_LANG_PUSH([C++])
+	AC_TRY_LINK([#include <hdf5.h>
+#include <hdf5_hl.h>],[
+	return 0;
+],[hdf5_hl_h=yes],[hdf5_hl_h=no])
+AC_MSG_RESULT([${hdf5_hl_h}])	
+	fi
+	
+	if test "${hdf5_hl_h}" = "yes" ; then	
+AC_MSG_CHECKING([whether we can compile a program using the HDF5 library])
+AC_LANG_PUSH([C++])
+	LIBS="${LIBS} -lhdf5_hl -lhdf5"
+	AC_TRY_LINK([#include <hdf5.h>
+#include <hdf5_hl.h>],[
+	hid_t const file_id = H5Fopen("file.h5", H5F_ACC_RDONLY, H5P_DEFAULT);
+	herr_t status = H5Fclose(file_id);
+	return 0;
+],[hdf5=yes],[hdf5=no])
+AC_MSG_RESULT([${hdf5}])
+	fi
+
+
+	CPPFLAGS=${CPPFLAGS_SAVE}
+	CXXFLAGS=${CXXFLAGS_SAVE}
+	LIBS=${LIBS_SAVE}
+	LDFLAGS=${LDFLAGS_SAVE}
+fi
+
+if test "${hdf5}" = "no" ; then
+	AC_MSG_ERROR([Required HDF5 library not found])
+else
+	if test "${with_hdf5}" != "yes" ; then
+		HDF5CPPFLAGS="-I${HDF5DIR}/include"
+		HDF5LDFLAGS="-L${HDF5DIR}/lib"
+	fi
+	HDF5LIBS="-lhdf5_hl -lhdf5"
+fi
+
 PACKAGE_NAME=${PACKAGE}
 PACKAGE_VERSION=${VERSION}
 
 AC_SUBST([PACKAGE_NAME])
 AC_SUBST([PACKAGE_VERSION])
+AC_SUBST([HDF5DIR])
+AC_SUBST([HDF5CPPFLAGS])
+AC_SUBST([HDF5LDFLAGS])
+AC_SUBST([HDF5LIBS])
 AC_OUTPUT(Makefile src/Makefile)
