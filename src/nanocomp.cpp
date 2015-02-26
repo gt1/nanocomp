@@ -32,6 +32,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <config.h>
+
 /* set of hdf paths we check for fastq data */
 char const * fastq_paths[] =
 {
@@ -47,7 +49,7 @@ struct FileCallback
 	virtual void operator()(std::string const & fn) = 0;
 };
 
-void enumFiles(std::string const & filename, FileCallback & FC)
+static void enumFiles(std::string const & filename, FileCallback & FC)
 {
 	struct stat sb;
 	if ( !stat(filename.c_str(),&sb) )
@@ -603,49 +605,127 @@ struct PrintFileCallback : public FileCallback, public Fast5ToFastQWorkPackageFi
 	}
 };
 
+static int nanocomp(libmaus::util::ArgInfo const & arginfo)
+{
+	std::string const idsuffix = arginfo.getUnparsedValue("idsuffix","");
+	bool const removefiles = arginfo.getValue<unsigned int>("removefiles",true);
+
+	std::ostream * Pout = &std::cout;
+	libmaus::lz::GzipOutputStream::unique_ptr_type Pgz;
+	if ( arginfo.getValue<int>("gz",0) )
+	{
+		int const level = arginfo.getValue<int>("level",Z_DEFAULT_COMPRESSION);
+		libmaus::lz::GzipOutputStream::unique_ptr_type Tgz(new libmaus::lz::GzipOutputStream(*Pout,64*1024,level));
+		Pgz = UNIQUE_PTR_MOVE(Tgz);
+		Pout = Pgz.get();
+	}
+
+	int const threads= arginfo.getValue<int>("threads",1);
+	PrintFileCallback PFC(*Pout,idsuffix,threads);
+	for ( size_t i = 0; i < arginfo.restargs.size(); ++i )
+		enumFiles(arginfo.restargs[i],PFC);
+		
+	while ( ! PFC.finished() )
+		sleep(1);
+		
+	PFC.terminate();
+	
+	if ( 
+		PFC.filenamelcp.size() >= strlen("_ch") &&
+		PFC.filenamelcp.substr(PFC.filenamelcp.size()-strlen("_ch")) == "_ch" )
+		PFC.filenamelcp = PFC.filenamelcp.substr(0,PFC.filenamelcp.size()-strlen("_ch"));
+
+	std::string const histprefix = arginfo.getUnparsedValue("histprefix",PFC.filenamelcp);
+	
+	PFC.printHistograms(histprefix);
+	std::cerr << "[V]\tminexpstarttime=" << PFC.minexpstarttime << "\tmaxexpstarttime=" << PFC.maxexpstarttime << std::endl;
+	
+	if ( PFC.minexpstarttime != PFC.maxexpstarttime )
+		std::cerr << "[E] inconsistent experiment start time" << std::endl;			
+
+	PFC.printThroughputGraph(histprefix,removefiles);
+
+	return EXIT_SUCCESS;
+}
+
+static std::string printLeft(std::string const & s, uint64_t const w, char const fill)
+{
+	std::ostringstream ostr;
+	ostr << std::setiosflags(std::ios::left);
+	ostr << std::setw(w);
+	ostr << std::setfill(fill);
+	ostr << s;
+	return ostr.str();
+}
+
+static std::ostream & printMap(std::ostream & out, std::vector< std::pair<std::string,std::string> > const & M)
+{
+	uint64_t maxfield = 0;
+	for ( std::vector< std::pair<std::string,std::string> >::const_iterator ita = M.begin(); ita != M.end(); ++ita )
+		maxfield = std::max(maxfield,static_cast<uint64_t>(ita->first.size()));
+
+	for ( std::vector< std::pair<std::string,std::string> >::const_iterator ita = M.begin(); ita != M.end(); ++ita )
+		out << printLeft(ita->first,maxfield,' ') << " : " << ita->second << std::endl;
+	
+	return out;
+}
+
+static std::string license()
+{
+	std::ostringstream ostr;
+	ostr << "This is " << PACKAGE_NAME << " version " << PACKAGE_VERSION << "." << std::endl;
+	ostr << PACKAGE_NAME << " is distributed under version 3 of the GNU General Public License." << std::endl;
+	return ostr.str();
+}
+
+
 int main(int argc, char * argv[])
 {
 	try
 	{
 		libmaus::util::ArgInfo const arginfo(argc,argv);
-		
-		std::string const idsuffix = arginfo.getUnparsedValue("idsuffix","");
-		bool const removefiles = arginfo.getValue<unsigned int>("removefiles",true);
-	
-		std::ostream * Pout = &std::cout;
-		libmaus::lz::GzipOutputStream::unique_ptr_type Pgz;
-		if ( arginfo.getValue<int>("gz",0) )
-		{
-			int const level = arginfo.getValue<int>("level",Z_DEFAULT_COMPRESSION);
-			libmaus::lz::GzipOutputStream::unique_ptr_type Tgz(new libmaus::lz::GzipOutputStream(*Pout,64*1024,level));
-			Pgz = UNIQUE_PTR_MOVE(Tgz);
-			Pout = Pgz.get();
-		}
-	
-		int const threads= arginfo.getValue<int>("threads",1);
-		PrintFileCallback PFC(*Pout,idsuffix,threads);
-		for ( size_t i = 0; i < arginfo.restargs.size(); ++i )
-			enumFiles(arginfo.restargs[i],PFC);
-			
-		while ( ! PFC.finished() )
-			sleep(1);
-			
-		PFC.terminate();
-		
-		if ( 
-			PFC.filenamelcp.size() >= strlen("_ch") &&
-			PFC.filenamelcp.substr(PFC.filenamelcp.size()-strlen("_ch")) == "_ch" )
-			PFC.filenamelcp = PFC.filenamelcp.substr(0,PFC.filenamelcp.size()-strlen("_ch"));
 
-		std::string const histprefix = arginfo.getUnparsedValue("histprefix",PFC.filenamelcp);
-		
-		PFC.printHistograms(histprefix);
-		std::cerr << "[V]\tminexpstarttime=" << PFC.minexpstarttime << "\tmaxexpstarttime=" << PFC.maxexpstarttime << std::endl;
-		
-		if ( PFC.minexpstarttime != PFC.maxexpstarttime )
-			std::cerr << "[E] inconsistent experiment start time" << std::endl;			
+		for ( uint64_t i = 0; i < arginfo.restargs.size(); ++i )
+			if ( 
+				arginfo.restargs[i] == "-v"
+				||
+				arginfo.restargs[i] == "--version"
+			)
+			{
+				std::cerr << license();
+				return EXIT_SUCCESS;
+			}
+			else if ( 
+				arginfo.restargs[i] == "-h"
+				||
+				arginfo.restargs[i] == "--help"
+			)
+			{
+				std::cerr << license() << std::endl;
+				std::cerr << "Key=Value pairs:" << std::endl;
+				std::cerr << std::endl;
+				
+				std::vector< std::pair<std::string,std::string> > V;
+								
+				V.push_back ( std::pair<std::string,std::string> ( "idsuffix=<[]>", "suffix appended to read names (default empty string)" ) );
+				V.push_back ( std::pair<std::string,std::string> ( "removefiles=<1>", "remove data files after creating plots (default 1)" ) );
+				V.push_back ( std::pair<std::string,std::string> ( "gz=<0>", "compress output FastQ using gzip (default 0)" ) );
+				V.push_back ( std::pair<std::string,std::string> ( "level=<-1>", "gzip compression level if gz=1 (default -1)" ) );
+				V.push_back ( std::pair<std::string,std::string> ( "threads=<1>", "number of threads used for conversion (default 1)" ) );
+				V.push_back ( std::pair<std::string,std::string> ( "histprefix=<>", "histogram prefix (default: use LCP of file names))" ) );
 
-		PFC.printThroughputGraph(histprefix,removefiles);
+				printMap(std::cerr,V);
+
+				std::cerr << std::endl;
+				
+				std::cerr << "usage: nanocomp [key=value] <input_directory with h5 files>" << std::endl;
+
+				std::cerr << std::endl;
+				return EXIT_SUCCESS;
+			}
+
+
+		return nanocomp(arginfo);		
 	}
 	catch(std::exception const & ex)
 	{

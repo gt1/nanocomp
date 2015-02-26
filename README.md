@@ -28,4 +28,10 @@ Please note that HDF5 needs to be set up for multi threading, otherwise nanocomp
 Running the program
 -------------------
 
+The program can be run using
 
+	nanocomp directory_with_hdf5_files
+
+A  list of options can be obtained by running
+
+	nanocomp -h
